@@ -1,15 +1,19 @@
 [package]
-name = "app"
-version = "0.1.0"
-description = "PDF Tools - A desktop PDF processing application"
-authors = ["you"]
-license = ""
-repository = ""
+name = "pdflinux"
+version = "0.1.8"
+description = "PDFLinux - Privacy-first PDF tools for Linux"
+authors = ["saaandbite"]
+license = "MIT"
+repository = "https://github.com/saaandbite/pdflinux"
 edition = "2021"
 rust-version = "1.77.2"
 
+[[bin]]
+name = "pdflinux"
+path = "src/main.rs"
+
 [lib]
-name = "app_lib"
+name = "pdflinux_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
 [build-dependencies]

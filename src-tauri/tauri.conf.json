@@ -1,8 +1,8 @@
 {
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
-  "productName": "PDF Tools",
-  "version": "0.1.0",
-  "identifier": "com.tauri.dev",
+  "productName": "PDFLinux",
+  "version": "0.1.8",
+  "identifier": "io.github.saaandbite.pdflinux",
   "build": {
     "frontendDist": "../dist",
     "devUrl": "http://localhost:5173",
@@ -12,9 +12,11 @@
   "app": {
     "windows": [
       {
-        "title": "PDF Tools",
-        "width": 800,
-        "height": 600,
+        "title": "PDFLinux",
+        "width": 1000,
+        "height": 680,
+        "minWidth": 800,
+        "minHeight": 560,
         "resizable": true,
         "fullscreen": false
       }
@@ -25,13 +27,16 @@
   },
   "bundle": {
     "active": true,
-    "targets": "all",
+    "targets": ["deb", "rpm", "appimage"],
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
       "icons/128x128@2x.png",
       "icons/icon.icns",
       "icons/icon.ico"
-    ]
+    ],
+    "category": "Utility",
+    "shortDescription": "Privacy-first PDF tools for Linux",
+    "longDescription": "A fast, privacy-first desktop application for all your everyday PDF tasks. Runs 100% offline — no files are uploaded anywhere."
   }
 }

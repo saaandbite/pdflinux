@@ -268,9 +268,10 @@ pub async fn rotate_pdf(input_path: String, output_path: String, angle: String, 
 
         let rotation = format!("+{}", angle);
         let page_spec = if pages.is_empty() || pages == "all" { "1-z".to_string() } else { pages };
+        let rotate_arg = format!("--rotate={}:{}", rotation, page_spec);
 
         let output = Command::new("qpdf")
-            .args([&input_path, &output_path, "--rotate", &format!("{}:{}", rotation, page_spec)])
+            .args([&rotate_arg, &input_path, &output_path])
             .output()
             .map_err(|e| format!("Gagal menjalankan qpdf: {}", e))?;
 
@@ -388,23 +389,27 @@ pub async fn image_to_pdf(input_paths: Vec<String>, output_path: String) -> Resu
     tokio::task::spawn_blocking(move || {
         let _guard = pdf_lock();
 
-        // Memory limits prevent ImageMagick from consuming excessive RAM on large images.
         let mut args = vec![
-            "-limit".to_string(), "memory".to_string(), "128MiB".to_string(),
-            "-limit".to_string(), "map".to_string(),    "128MiB".to_string(),
+            "-sDEVICE=pdfwrite".to_string(),
+            "-dNOPAUSE".to_string(),
+            "-dQUIET".to_string(),
+            "-dBATCH".to_string(),
+            "-dNumRenderingThreads=1".to_string(),
+            "-dNOINTERPOLATE".to_string(),
+            "-dMaxBitmap=50331648".to_string(),
+            format!("-sOutputFile={}", output_path),
+            "-c".to_string(), "8388608 setvmthreshold".to_string(),
+            "-f".to_string(),
         ];
         args.extend(input_paths);
-        args.push("-quality".to_string());
-        args.push("90".to_string());
-        args.push(output_path.clone());
 
-        let output = Command::new("magick")
+        let output = Command::new("gs")
             .args(&args)
             .output()
-            .map_err(|e| format!("Gagal menjalankan ImageMagick: {}", e))?;
+            .map_err(|e| format!("Gagal menjalankan Ghostscript: {}", e))?;
 
         if !output.status.success() {
-            return Err(format!("ImageMagick error: {}", String::from_utf8_lossy(&output.stderr)));
+            return Err(format!("Ghostscript error: {}", String::from_utf8_lossy(&output.stderr)));
         }
 
         let output_size = fs::metadata(&output_path)

@@ -1,24 +1,48 @@
 {
-  "name": "pdf",
-  "private": true,
-  "version": "0.0.0",
+  "name": "pdflinux",
+  "version": "0.1.8",
+  "description": "Privacy-first PDF tools for Linux — runs 100% offline",
+  "keywords": ["pdf", "linux", "tools", "privacy", "tauri", "desktop"],
+  "author": "saaandbite",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/saaandbite/pdflinux"
+  },
+  "homepage": "https://github.com/saaandbite/pdflinux#readme",
   "type": "module",
+  "bin": {
+    "pdflinux": "./bin/pdflinux"
+  },
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
+    "tauri": "tauri",
     "lint": "eslint .",
     "preview": "vite preview"
   },
+  "files": [
+    "bin/",
+    "install.sh",
+    "uninstall.sh",
+    "src/",
+    "src-tauri/",
+    "public/",
+    "index.html",
+    "vite.config.ts",
+    "tsconfig*.json",
+    "package-lock.json"
+  ],
   "dependencies": {
-    "@tauri-apps/api": "^2.10.1",
-    "@tauri-apps/plugin-dialog": "^2.6.0",
+    "@tauri-apps/api": "~2.10.1",
+    "@tauri-apps/plugin-dialog": "~2.6.0",
     "react": "^19.2.4",
     "react-dom": "^19.2.4",
     "react-router-dom": "^7.13.2"
   },
   "devDependencies": {
     "@eslint/js": "^9.39.4",
-    "@tauri-apps/cli": "^2.10.1",
+    "@tauri-apps/cli": "~2.10.1",
     "@types/node": "^24.12.0",
     "@types/react": "^19.2.14",
     "@types/react-dom": "^19.2.3",
