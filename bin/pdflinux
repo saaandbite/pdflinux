@@ -1,9 +1,9 @@
 #!/usr/bin/env node
-import { execSync } from 'node:child_process';
-import { createWriteStream, readFileSync, existsSync } from 'node:fs';
+import { execSync, spawnSync } from 'node:child_process';
+import { createWriteStream, readFileSync, writeFileSync, appendFileSync, rmSync, existsSync, mkdirSync, copyFileSync, chmodSync } from 'node:fs';
 import { resolve, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { tmpdir } from 'node:os';
+import { tmpdir, homedir } from 'node:os';
 import https from 'node:https';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -21,6 +21,43 @@ if (arg === 'uninstall') {
     console.error(`\nError: ${err.message}`);
     process.exit(1);
   });
+}
+
+// ── Privilege detection ───────────────────────────────────────────────────────
+
+function isRoot() {
+  try { return process.getuid?.() === 0; } catch { return false; }
+}
+
+function hasSudo() {
+  if (isRoot()) return true;
+  const r = spawnSync('sudo', ['-n', 'true'], { stdio: 'ignore' });
+  return r.status === 0;
+}
+
+/**
+ * Try to run a command with sudo/root. If no sudo available, warn and return false.
+ * @param {string[]} args
+ * @returns {boolean} success
+ */
+function privRun(args) {
+  try {
+    if (isRoot()) {
+      execSync(args.join(' '), { stdio: 'inherit' });
+    } else {
+      execSync(['sudo', ...args].join(' '), { stdio: 'inherit' });
+    }
+    return true;
+  } catch (e) {
+    const msg = e.message || '';
+    if (msg.includes('sudoers') || msg.includes('not allowed') || msg.includes('sudo:')) {
+      console.warn(`  ⚠  No sudo access. Cannot run: ${args.join(' ')}`);
+      console.warn(`     Ask your admin to run this command manually.`);
+    } else {
+      console.warn(`  ⚠  Command failed: ${args.join(' ')}`);
+    }
+    return false;
+  }
 }
 
 // ── Distro detection ──────────────────────────────────────────────────────────
@@ -81,6 +118,137 @@ function download(url, dest) {
   });
 }
 
+// ── System deps ───────────────────────────────────────────────────────────────
+
+function installSystemDeps(type) {
+  console.log('Installing PDF tools (Ghostscript, Poppler, QPDF, Tesseract)...');
+  let ok = false;
+  try {
+    if (type === 'deb') {
+      ok = privRun(['apt-get', 'install', '-y', 'ghostscript', 'poppler-utils', 'qpdf', 'tesseract-ocr']);
+    } else if (type === 'rpm') {
+      ok = privRun(['dnf', 'install', '-y', 'ghostscript', 'poppler-utils', 'qpdf', 'tesseract'])
+        || privRun(['yum', 'install', '-y', 'ghostscript', 'poppler-utils', 'qpdf', 'tesseract']);
+    } else if (existsSync('/usr/bin/pacman')) {
+      ok = privRun(['pacman', '-Sy', '--noconfirm', 'ghostscript', 'poppler', 'qpdf', 'tesseract']);
+    } else if (existsSync('/usr/bin/zypper')) {
+      ok = privRun(['zypper', 'install', '-y', 'ghostscript', 'poppler-tools', 'qpdf', 'tesseract-ocr']);
+    }
+  } catch { ok = false; }
+
+  if (!ok) {
+    console.warn('  ⚠  Could not auto-install system deps.');
+    console.warn('     Please install manually: ghostscript poppler-utils qpdf tesseract-ocr');
+  }
+}
+
+// ── Install .deb ──────────────────────────────────────────────────────────────
+
+function installDeb(tmp) {
+  // Try system-wide install first
+  const ok = privRun(['apt-get', 'install', '-y', `"${tmp}"`]);
+  if (ok) return;
+
+  // No-sudo fallback: extract binary with dpkg-deb
+  console.log('  Trying user-level fallback (no sudo)...');
+  const extractDir = join(tmpdir(), 'pdflinux_extract');
+  const localBin = join(homedir(), '.local', 'bin');
+  mkdirSync(localBin, { recursive: true });
+
+  try {
+    execSync(`dpkg-deb -x "${tmp}" "${extractDir}"`, { stdio: 'inherit' });
+    const extracted = join(extractDir, 'usr', 'bin', 'pdflinux');
+    if (existsSync(extracted)) {
+      const dest = join(localBin, 'pdflinux');
+      copyFileSync(extracted, dest);
+      chmodSync(dest, 0o755);
+      ensureLocalBinInPath(localBin);
+      console.log(`  ✓ Installed to ${dest} (user install, no root needed)`);
+      installDesktopFile(dest);
+      return;
+    }
+  } catch (e) {
+    console.warn(`  ⚠  dpkg-deb extraction failed: ${e.message}`);
+  }
+
+  console.error('\n  ✗ Could not install pdflinux.');
+  console.error(`    Ask your system administrator to run:`);
+  console.error(`      sudo apt-get install -y "${tmp}"`);
+  process.exit(1);
+}
+
+// ── Install .rpm ──────────────────────────────────────────────────────────────
+
+function installRpm(tmp) {
+  const ok = privRun(['dnf', 'install', '-y', `"${tmp}"`])
+          || privRun(['yum', 'install', '-y', `"${tmp}"`]);
+  if (!ok) {
+    console.error('\n  ✗ Could not install pdflinux (no sudo).');
+    console.error(`    Ask your admin to run: sudo dnf install -y "${tmp}"`);
+    process.exit(1);
+  }
+}
+
+// ── Install AppImage (always user-level, no sudo) ─────────────────────────────
+
+function installAppImage(src) {
+  const localBin = join(homedir(), '.local', 'bin');
+  mkdirSync(localBin, { recursive: true });
+  const dest = join(localBin, 'pdflinux');
+  copyFileSync(src, dest);
+  chmodSync(dest, 0o755);
+  ensureLocalBinInPath(localBin);
+  installDesktopFile(dest);
+  console.log(`  ✓ Installed AppImage to ${dest}`);
+}
+
+// ── Desktop integration (user-level, no sudo) ─────────────────────────────────
+
+function installDesktopFile(execPath) {
+  try {
+    const desktopDir = join(homedir(), '.local', 'share', 'applications');
+    mkdirSync(desktopDir, { recursive: true });
+    const iconSrc = resolve(root, 'src-tauri/icons/128x128.png');
+    const iconDir = join(homedir(), '.local', 'share', 'icons', 'hicolor', '128x128', 'apps');
+    mkdirSync(iconDir, { recursive: true });
+    if (existsSync(iconSrc)) {
+      copyFileSync(iconSrc, join(iconDir, 'pdflinux.png'));
+    }
+    const desktop = [
+      '[Desktop Entry]',
+      'Type=Application',
+      'Name=PDFLinux',
+      'Comment=Privacy-first PDF tools for Linux — runs 100% offline',
+      `Exec=${execPath}`,
+      'Icon=pdflinux',
+      'Categories=Office;Utility;',
+      'Terminal=false',
+      'StartupNotify=true',
+    ].join('\n') + '\n';
+    const desktopPath = join(desktopDir, 'pdflinux.desktop');
+    writeFileSync(desktopPath, desktop);
+    try { execSync(`update-desktop-database "${desktopDir}" 2>/dev/null`, { stdio: 'ignore' }); } catch {}
+    console.log('  ✓ Application menu shortcut added.');
+  } catch (e) {
+    console.warn(`  ⚠  Could not add desktop shortcut: ${e.message}`);
+  }
+}
+
+function ensureLocalBinInPath(dir) {
+  const shell = process.env.SHELL || '';
+  let rc = '';
+  if (shell.includes('bash')) rc = join(homedir(), '.bashrc');
+  else if (shell.includes('zsh')) rc = join(homedir(), '.zshrc');
+  if (rc && existsSync(rc)) {
+    const content = readFileSync(rc, 'utf8');
+    if (!content.includes(dir)) {
+      appendFileSync(rc, `\nexport PATH="${dir}:$PATH"\n`);
+      console.log(`  ✓ Added ${dir} to PATH in ${rc}`);
+      console.log(`    Run: source ${rc}`);
+    }
+  }
+}
+
 // ── Install ───────────────────────────────────────────────────────────────────
 
 async function runInstall() {
@@ -99,22 +267,26 @@ async function runInstall() {
   console.log(`\nPDFLinux v${VERSION} Installer`);
   console.log(`Distro  : ${id || 'unknown'}${idLike ? ` (like ${idLike})` : ''}`);
   console.log(`Package : ${type.toUpperCase()}`);
-  console.log(`\nDownloading ${filename}...`);
 
+  if (!hasSudo() && !isRoot()) {
+    console.warn(`\n  ⚠  No sudo access detected.`);
+    console.warn(`     System-level installation may not be possible.`);
+    if (type !== 'appimage') {
+      console.warn(`     Will attempt user-level fallback (${homedir()}/.local/bin).`);
+    }
+    console.log('');
+  }
+
+  console.log(`\nDownloading ${filename}...`);
   await download(url, tmp);
 
-  console.log('Installing PDF tools (Ghostscript, Poppler, QPDF, Tesseract)...');
   installSystemDeps(type);
 
-  console.log('Installing pdflinux...');
+  console.log(`\nInstalling pdflinux...`);
   if (type === 'deb') {
-    execSync(`sudo apt-get install -y "${tmp}"`, { stdio: 'inherit' });
+    installDeb(tmp);
   } else if (type === 'rpm') {
-    try {
-      execSync(`sudo dnf install -y "${tmp}"`, { stdio: 'inherit' });
-    } catch {
-      execSync(`sudo yum install -y "${tmp}"`, { stdio: 'inherit' });
-    }
+    installRpm(tmp);
   } else {
     installAppImage(tmp);
   }
@@ -124,88 +296,43 @@ async function runInstall() {
   console.log(`  Or find it in your application menu.\n`);
 }
 
-function installSystemDeps(type) {
-  try {
-    if (type === 'deb') {
-      execSync('sudo apt-get install -y ghostscript poppler-utils qpdf tesseract-ocr', { stdio: 'inherit' });
-    } else if (type === 'rpm') {
-      try {
-        execSync('sudo dnf install -y ghostscript poppler-utils qpdf tesseract', { stdio: 'inherit' });
-      } catch {
-        execSync('sudo yum install -y ghostscript poppler-utils qpdf tesseract', { stdio: 'inherit' });
-      }
-    } else if (existsSync('/usr/bin/pacman')) {
-      execSync('sudo pacman -Sy --noconfirm ghostscript poppler qpdf tesseract', { stdio: 'inherit' });
-    } else if (existsSync('/usr/bin/zypper')) {
-      execSync('sudo zypper install -y ghostscript poppler-tools qpdf tesseract-ocr', { stdio: 'inherit' });
-    }
-  } catch (e) {
-    console.warn(`  Warning: could not auto-install system deps: ${e.message}`);
-    console.warn('  Please install manually: ghostscript poppler-utils qpdf tesseract-ocr');
-  }
-}
-
-function installAppImage(src) {
-  const appImageDest = '/opt/pdflinux/pdflinux.AppImage';
-  const iconSrc = resolve(root, 'src-tauri/icons/128x128.png');
-
-  execSync('sudo mkdir -p /opt/pdflinux', { stdio: 'inherit' });
-  execSync(`sudo cp "${src}" "${appImageDest}"`, { stdio: 'inherit' });
-  execSync(`sudo chmod +x "${appImageDest}"`, { stdio: 'inherit' });
-  execSync(`sudo ln -sf "${appImageDest}" /usr/local/bin/pdflinux`, { stdio: 'inherit' });
-
-  if (existsSync(iconSrc)) {
-    execSync('sudo mkdir -p /usr/share/icons/hicolor/128x128/apps', { stdio: 'inherit' });
-    execSync(`sudo cp "${iconSrc}" /usr/share/icons/hicolor/128x128/apps/pdflinux.png`, { stdio: 'inherit' });
-  }
-
-  const desktop = [
-    '[Desktop Entry]',
-    'Type=Application',
-    'Name=PDFLinux',
-    'Comment=Privacy-first PDF tools for Linux — runs 100% offline',
-    `Exec=${appImageDest}`,
-    'Icon=pdflinux',
-    'Categories=Office;Utility;',
-    'Terminal=false',
-    'StartupNotify=true',
-  ].join('\n') + '\n';
-
-  execSync('sudo tee /usr/share/applications/pdflinux.desktop > /dev/null', {
-    input: desktop,
-    stdio: ['pipe', 'inherit', 'inherit'],
-  });
-  execSync('sudo update-desktop-database /usr/share/applications/ 2>/dev/null || true', { stdio: 'inherit' });
-}
-
 // ── Uninstall ─────────────────────────────────────────────────────────────────
 
 function runUninstall() {
   const { id, idLike } = detectDistro();
   const type = getPackageType(id, idLike);
+  const localBin = join(homedir(), '.local', 'bin', 'pdflinux');
 
   console.log('Uninstalling pdflinux...');
+
+  // Remove user-level install first (no sudo needed)
+  if (existsSync(localBin)) {
+    try {
+      rmSync(localBin);
+      console.log(`  ✓ Removed ${localBin}`);
+    } catch (e) {
+      console.warn(`  Could not remove ${localBin}: ${e.message}`);
+    }
+  }
+
+  // Remove desktop file
+  const desktopFile = join(homedir(), '.local', 'share', 'applications', 'pdflinux.desktop');
+  if (existsSync(desktopFile)) {
+    try { rmSync(desktopFile); } catch {}
+  }
+
+  // Remove system-level install (if sudo available)
   try {
     if (type === 'deb') {
-      execSync('sudo apt-get remove -y pdflinux', { stdio: 'inherit' });
+      privRun(['apt-get', 'remove', '-y', 'pdflinux']);
     } else if (type === 'rpm') {
-      try {
-        execSync('sudo dnf remove -y pdflinux', { stdio: 'inherit' });
-      } catch {
-        execSync('sudo yum remove -y pdflinux', { stdio: 'inherit' });
-      }
+      privRun(['dnf', 'remove', '-y', 'pdflinux']) || privRun(['yum', 'remove', '-y', 'pdflinux']);
     } else {
-      execSync(
-        'sudo rm -rf /opt/pdflinux /usr/local/bin/pdflinux ' +
-        '/usr/share/applications/pdflinux.desktop ' +
-        '/usr/share/icons/hicolor/128x128/apps/pdflinux.png',
-        { stdio: 'inherit' }
-      );
-      execSync('sudo update-desktop-database /usr/share/applications/ 2>/dev/null || true', { stdio: 'inherit' });
+      privRun(['rm', '-rf', '/opt/pdflinux', '/usr/local/bin/pdflinux',
+        '/usr/share/applications/pdflinux.desktop',
+        '/usr/share/icons/hicolor/128x128/apps/pdflinux.png']);
     }
-    console.log('pdflinux has been uninstalled.');
-  } catch (e) {
-    console.error(`Uninstall failed: ${e.message}`);
-    process.exit(1);
-  }
+  } catch { /* ignore */ }
+
+  console.log('pdflinux has been uninstalled.');
 }

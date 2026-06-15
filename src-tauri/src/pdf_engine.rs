@@ -526,37 +526,27 @@ pub async fn crop_pdf(
             return Err("Area crop tidak valid — coba perbesar area seleksi.".to_string());
         }
 
-        let output = Command::new("qpdf")
-            .args([
-                &input_path,
-                &format!("--set-page-labels={}:{}", 1, 1),
-                "--pages", &input_path, "1-z", "--",
-                &output_path,
-            ])
-            .output();
+        // Crop width/height in points
+        let crop_w = urx - llx;
+        let crop_h = ury - lly;
 
-        // Use GS to set MediaBox/CropBox from our fraction coords
-        let gs_script = format!(
-            "[{{{}}}  /CropBox [{:.2} {:.2} {:.2} {:.2}] /PAGES pdfmark",
-            "thispage", llx, lly, urx, ury
-        );
-
-        // Use qpdf to copy, then GS to apply cropbox
-        // Actually use GS directly with cropbox pdfmark
+        // GS approach: resize MediaBox to crop area + shift page origin so content aligns.
+        // -dFIXEDMEDIA forces the new media size; PageOffset shifts content to compensate.
+        // This physically removes content outside the selection — no viewer can "un-crop" it.
         let gs_out = Command::new("gs")
             .args([
                 "-sDEVICE=pdfwrite",
                 "-dNOPAUSE", "-dQUIET", "-dBATCH",
-                &format!("-sOutputFile={}", output_path),
-                "-c", &format!("<< /CropBox [{:.2} {:.2} {:.2} {:.2}] >> setpagedevice", llx, lly, urx, ury),
+                "-dFIXEDMEDIA",
+                &format!("-dDEVICEWIDTHPOINTS={:.4}", crop_w),
+                &format!("-dDEVICEHEIGHTPOINTS={:.4}", crop_h),
+                &format!("-c"),
+                &format!("<< /PageOffset [{:.4} {:.4}] >> setpagedevice", -llx, -lly),
                 "-f", &input_path,
+                &format!("-sOutputFile={}", output_path),
             ])
             .output()
             .map_err(|e| format!("Gagal menjalankan Ghostscript: {}", e))?;
-
-        // silence unused warning
-        drop(output);
-        drop(gs_script);
 
         if !gs_out.status.success() {
             return Err(format!("Ghostscript error: {}", String::from_utf8_lossy(&gs_out.stderr)));

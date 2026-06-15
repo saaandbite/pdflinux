@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-set -euo pipefail
+set -uo pipefail
 
 APP_NAME="pdflinux"
 DISPLAY_NAME="PDFLinux"
@@ -15,6 +15,47 @@ info()    { echo -e "${BLUE}[*]${NC} $*"; }
 success() { echo -e "${GREEN}[✓]${NC} $*"; }
 warn()    { echo -e "${YELLOW}[!]${NC} $*"; }
 error()   { echo -e "${RED}[✗]${NC} $*"; exit 1; }
+
+# ── Privilege helper ─────────────────────────────────────────────────────────
+
+HAS_SUDO=false
+RUN_AS_ROOT=false
+
+detect_privilege() {
+    if [ "$(id -u)" = "0" ]; then
+        RUN_AS_ROOT=true
+        HAS_SUDO=true
+        return
+    fi
+    if command -v sudo &>/dev/null && sudo -n true 2>/dev/null; then
+        HAS_SUDO=true
+        return
+    fi
+    # Try to get sudo interactively (non-fatal)
+    if command -v sudo &>/dev/null; then
+        if sudo -v 2>/dev/null; then
+            HAS_SUDO=true
+            # Keep sudo token alive in background
+            ( while true; do sudo -v 2>/dev/null; sleep 50; done ) &
+            SUDO_KEEPALIVE=$!
+            trap "kill \${SUDO_KEEPALIVE:-0} 2>/dev/null; true" EXIT
+        fi
+    fi
+}
+
+# Wrapper: run command with privilege if available, else warn and continue
+priv_run() {
+    if [ "$RUN_AS_ROOT" = true ]; then
+        "$@"
+    elif [ "$HAS_SUDO" = true ]; then
+        sudo "$@"
+    else
+        warn "Tidak ada akses sudo. Lewati: $*"
+        warn "Jalankan perintah berikut secara manual sebagai root:"
+        warn "  $*"
+        return 1
+    fi
+}
 
 detect_distro() {
     if [ -f /etc/os-release ]; then
@@ -46,7 +87,6 @@ detect_pkg_manager() {
             if command -v zypper &>/dev/null; then echo "zypper"; else echo "unknown"; fi
             ;;
         *)
-            # Fallback: prefer distro-specific managers over apt
             if command -v dnf &>/dev/null; then echo "dnf"
             elif command -v pacman &>/dev/null; then echo "pacman"
             elif command -v zypper &>/dev/null; then echo "zypper"
@@ -94,44 +134,52 @@ try_download_prebuilt() {
 
 install_system_deps() {
     local pm="$1"
-    info "Installing PDF system dependencies (Ghostscript, Poppler, QPDF, Tesseract)..."
+    info "Installing PDF tools (Ghostscript, Poppler, QPDF, Tesseract)..."
 
+    local DEPS_FAILED=false
     case "$pm" in
         apt)
-            sudo apt-get update -qq
-            sudo apt-get install -y \
+            priv_run apt-get update -qq || DEPS_FAILED=true
+            priv_run apt-get install -y \
                 ghostscript poppler-utils qpdf tesseract-ocr \
                 libwebkit2gtk-4.1-dev libssl-dev libayatana-appindicator3-dev \
-                librsvg2-dev pkg-config build-essential curl wget
+                librsvg2-dev pkg-config build-essential curl wget || DEPS_FAILED=true
             ;;
         dnf)
-            sudo dnf install -y \
+            priv_run dnf install -y \
                 ghostscript poppler-utils qpdf tesseract \
                 webkit2gtk4.1-devel openssl-devel librsvg2-devel \
-                pkg-config gcc curl wget
+                pkg-config gcc curl wget || DEPS_FAILED=true
             ;;
         yum)
-            sudo yum install -y \
+            priv_run yum install -y \
                 ghostscript poppler-utils qpdf tesseract \
                 webkit2gtk3-devel openssl-devel librsvg2-devel \
-                pkgconfig gcc curl wget
+                pkgconfig gcc curl wget || DEPS_FAILED=true
             ;;
         pacman)
-            sudo pacman -Sy --noconfirm \
+            priv_run pacman -Sy --noconfirm \
                 ghostscript poppler qpdf tesseract \
-                webkit2gtk-4.1 openssl librsvg pkg-config base-devel curl wget
+                webkit2gtk-4.1 openssl librsvg pkg-config base-devel curl wget || DEPS_FAILED=true
             ;;
         zypper)
-            sudo zypper install -y \
+            priv_run zypper install -y \
                 ghostscript poppler-tools qpdf tesseract-ocr \
                 webkit2gtk3-devel libopenssl-devel librsvg-devel \
-                pkg-config gcc curl wget
+                pkg-config gcc curl wget || DEPS_FAILED=true
             ;;
         *)
-            warn "Package manager not recognized. Make sure these are installed:"
-            warn "  ghostscript, poppler-utils, qpdf, tesseract-ocr"
+            warn "Package manager not recognized."
+            DEPS_FAILED=true
             ;;
     esac
+
+    if [ "$DEPS_FAILED" = true ]; then
+        warn "Could not auto-install system deps. Please install manually:"
+        warn "  ghostscript poppler-utils qpdf tesseract-ocr"
+    else
+        success "System dependencies installed."
+    fi
 }
 
 install_rust() {
@@ -154,18 +202,18 @@ install_node() {
     local pm="$1"
     case "$pm" in
         apt)
-            curl -fsSL https://deb.nodesource.com/setup_lts.x | sudo -E bash -
-            sudo apt-get install -y nodejs
+            curl -fsSL https://deb.nodesource.com/setup_lts.x | priv_run bash -
+            priv_run apt-get install -y nodejs
             ;;
         dnf|yum)
-            curl -fsSL https://rpm.nodesource.com/setup_lts.x | sudo bash -
-            sudo "$pm" install -y nodejs
+            curl -fsSL https://rpm.nodesource.com/setup_lts.x | priv_run bash -
+            priv_run "$pm" install -y nodejs
             ;;
         pacman)
-            sudo pacman -Sy --noconfirm nodejs npm
+            priv_run pacman -Sy --noconfirm nodejs npm
             ;;
         zypper)
-            sudo zypper install -y nodejs npm
+            priv_run zypper install -y nodejs npm
             ;;
         *)
             error "Please install Node.js LTS manually from https://nodejs.org/ then run this script again."
@@ -196,6 +244,82 @@ build_app() {
     success "Build complete."
 }
 
+install_prebuilt_deb() {
+    local path="$1"
+    info "Installing pdflinux from .deb package..."
+
+    # Try dpkg with privilege first
+    if priv_run dpkg -i "$path" 2>/dev/null; then
+        success "$DISPLAY_NAME installed successfully."
+        return 0
+    fi
+
+    # No sudo available — try user-level extraction fallback
+    warn "No sudo access. Attempting user-level installation..."
+    local install_dir="$HOME/.local/bin"
+    local tmp_extract="$HOME/.local/tmp_deb_extract"
+    mkdir -p "$install_dir" "$tmp_extract"
+
+    if command -v dpkg-deb &>/dev/null; then
+        dpkg-deb -x "$path" "$tmp_extract"
+        if [ -f "$tmp_extract/usr/bin/pdflinux" ]; then
+            cp "$tmp_extract/usr/bin/pdflinux" "$install_dir/pdflinux"
+            chmod +x "$install_dir/pdflinux"
+            rm -rf "$tmp_extract"
+            # Ensure ~/.local/bin is on PATH
+            _ensure_path_in_shell "$install_dir"
+            success "$DISPLAY_NAME installed to $install_dir/pdflinux (no-sudo fallback)"
+            return 0
+        fi
+        rm -rf "$tmp_extract"
+    fi
+
+    warn "Could not install $DISPLAY_NAME automatically."
+    warn "Please ask your system administrator to run:"
+    warn "  sudo dpkg -i $path"
+    return 1
+}
+
+install_prebuilt_rpm() {
+    local path="$1"
+    info "Installing pdflinux from .rpm package..."
+    if command -v dnf &>/dev/null; then
+        priv_run dnf install -y "$path" || {
+            warn "Please ask admin to run: sudo dnf install -y $path"
+        }
+    else
+        priv_run yum install -y "$path" || {
+            warn "Please ask admin to run: sudo yum install -y $path"
+        }
+    fi
+}
+
+install_prebuilt_appimage() {
+    local path="$1"
+    info "Installing AppImage..."
+    local install_dir="$HOME/.local/bin"
+    mkdir -p "$install_dir"
+    cp "$path" "$install_dir/$APP_NAME"
+    chmod +x "$install_dir/$APP_NAME"
+    _ensure_path_in_shell "$install_dir"
+    install_desktop_file "$install_dir/$APP_NAME"
+    success "$DISPLAY_NAME installed to $install_dir/$APP_NAME"
+}
+
+_ensure_path_in_shell() {
+    local dir="$1"
+    local shell_rc=""
+    case "$SHELL" in
+        */bash) shell_rc="$HOME/.bashrc" ;;
+        */zsh)  shell_rc="$HOME/.zshrc" ;;
+        */fish) shell_rc="$HOME/.config/fish/config.fish" ;;
+    esac
+    if [ -n "$shell_rc" ] && ! grep -q "$dir" "$shell_rc" 2>/dev/null; then
+        echo "export PATH=\"$dir:\$PATH\"" >> "$shell_rc"
+        warn "PATH updated in $shell_rc. Run: source $shell_rc"
+    fi
+}
+
 install_package() {
     local pm="$1"
     local bundle_dir="src-tauri/target/release/bundle"
@@ -205,9 +329,7 @@ install_package() {
             local deb
             deb=$(find "$bundle_dir/deb" -name "*.deb" 2>/dev/null | head -1)
             if [ -n "$deb" ]; then
-                info "Installing .deb package: $deb"
-                sudo dpkg -i "$deb"
-                success "$DISPLAY_NAME installed successfully."
+                install_prebuilt_deb "$deb"
                 return
             fi
             ;;
@@ -215,9 +337,7 @@ install_package() {
             local rpm
             rpm=$(find "$bundle_dir/rpm" -name "*.rpm" 2>/dev/null | head -1)
             if [ -n "$rpm" ]; then
-                info "Installing .rpm package: $rpm"
-                sudo "$pm" install -y "$rpm"
-                success "$DISPLAY_NAME installed successfully."
+                install_prebuilt_rpm "$rpm"
                 return
             fi
             ;;
@@ -229,26 +349,7 @@ install_package() {
     local appimage
     appimage=$(find "$bundle_dir/appimage" -name "*.AppImage" 2>/dev/null | head -1)
     if [ -n "$appimage" ]; then
-        info "Installing AppImage..."
-        local install_dir="$HOME/.local/bin"
-        mkdir -p "$install_dir"
-        cp "$appimage" "$install_dir/$APP_NAME"
-        chmod +x "$install_dir/$APP_NAME"
-
-        # Add to PATH if not already there
-        local shell_rc=""
-        case "$SHELL" in
-            */bash) shell_rc="$HOME/.bashrc" ;;
-            */zsh)  shell_rc="$HOME/.zshrc" ;;
-            */fish) shell_rc="$HOME/.config/fish/config.fish" ;;
-        esac
-        if [ -n "$shell_rc" ] && ! grep -q "$install_dir" "$shell_rc" 2>/dev/null; then
-            echo "export PATH=\"$install_dir:\$PATH\"" >> "$shell_rc"
-            warn "PATH updated in $shell_rc. Run: source $shell_rc"
-        fi
-
-        install_desktop_file "$appimage"
-        success "$DISPLAY_NAME installed as AppImage."
+        install_prebuilt_appimage "$appimage"
         return
     fi
 
@@ -288,7 +389,7 @@ EOF
     success "Application menu shortcut added."
 }
 
-# ── Main ────────────────────────────────────────────────────────────────────
+# ── Main ─────────────────────────────────────────────────────────────────────
 
 echo ""
 echo -e "${BLUE}╔══════════════════════════════════╗${NC}"
@@ -308,12 +409,15 @@ if [ "$PKG_MANAGER" = "unknown" ]; then
     error "Could not detect a supported package manager for distro '$DISTRO'. Supported: apt, dnf, yum, pacman, zypper."
 fi
 
-# Ask for sudo upfront and keep the token alive throughout the build
-info "This installer needs sudo for package installation. Please enter your password now."
-sudo -v
-( while true; do sudo -v; sleep 50; done ) &
-SUDO_KEEPALIVE=$!
-trap "kill $SUDO_KEEPALIVE 2>/dev/null" EXIT
+# Detect privilege level (non-fatal)
+detect_privilege
+
+if [ "$HAS_SUDO" = false ] && [ "$RUN_AS_ROOT" = false ]; then
+    warn "No sudo/root access detected."
+    warn "System-level installation will be skipped."
+    warn "If installation fails, ask your admin to run this script with sudo."
+    echo ""
+fi
 
 # Try downloading a pre-built binary first (fast path)
 prebuilt_result=""
@@ -323,39 +427,16 @@ if prebuilt_result=$(try_download_prebuilt "$PKG_MANAGER"); then
 
     install_system_deps "$PKG_MANAGER"
 
-    info "Installing pre-built binary..."
+    info "Installing $DISPLAY_NAME..."
     case "$prebuilt_type" in
         deb)
-            sudo dpkg -i "$prebuilt_path"
+            install_prebuilt_deb "$prebuilt_path"
             ;;
         rpm)
-            if command -v dnf &>/dev/null; then
-                sudo dnf install -y "$prebuilt_path"
-            else
-                sudo yum install -y "$prebuilt_path"
-            fi
+            install_prebuilt_rpm "$prebuilt_path"
             ;;
         appimage)
-            sudo mkdir -p /opt/pdflinux
-            sudo cp "$prebuilt_path" /opt/pdflinux/pdflinux.AppImage
-            sudo chmod +x /opt/pdflinux/pdflinux.AppImage
-            sudo ln -sf /opt/pdflinux/pdflinux.AppImage /usr/local/bin/pdflinux
-            if [ -f "src-tauri/icons/128x128.png" ]; then
-                sudo mkdir -p /usr/share/icons/hicolor/128x128/apps
-                sudo cp src-tauri/icons/128x128.png /usr/share/icons/hicolor/128x128/apps/pdflinux.png
-            fi
-            sudo tee /usr/share/applications/pdflinux.desktop > /dev/null <<EOF
-[Desktop Entry]
-Type=Application
-Name=PDFLinux
-Comment=Privacy-first PDF tools for Linux — runs 100% offline
-Exec=/opt/pdflinux/pdflinux.AppImage
-Icon=pdflinux
-Categories=Office;Utility;
-Terminal=false
-StartupNotify=true
-EOF
-            sudo update-desktop-database /usr/share/applications/ 2>/dev/null || true
+            install_prebuilt_appimage "$prebuilt_path"
             ;;
     esac
 else
