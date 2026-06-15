@@ -532,7 +532,8 @@ pub async fn crop_pdf(
 
         // GS approach: resize MediaBox to crop area + shift page origin so content aligns.
         // -dFIXEDMEDIA forces the new media size; PageOffset shifts content to compensate.
-        // This physically removes content outside the selection — no viewer can "un-crop" it.
+        // setpagedevice is a DEVICE-LEVEL setting → applies to ALL pages in the PDF.
+        // IMPORTANT: -sOutputFile MUST come before -f (input), otherwise GS has no output and crashes.
         let gs_out = Command::new("gs")
             .args([
                 "-sDEVICE=pdfwrite",
@@ -540,10 +541,9 @@ pub async fn crop_pdf(
                 "-dFIXEDMEDIA",
                 &format!("-dDEVICEWIDTHPOINTS={:.4}", crop_w),
                 &format!("-dDEVICEHEIGHTPOINTS={:.4}", crop_h),
-                &format!("-c"),
-                &format!("<< /PageOffset [{:.4} {:.4}] >> setpagedevice", -llx, -lly),
+                &format!("-sOutputFile={}", output_path),   // ← MUST be before -f
+                "-c", &format!("<< /PageOffset [{:.4} {:.4}] >> setpagedevice", -llx, -lly),
                 "-f", &input_path,
-                &format!("-sOutputFile={}", output_path),
             ])
             .output()
             .map_err(|e| format!("Gagal menjalankan Ghostscript: {}", e))?;

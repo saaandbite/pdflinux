@@ -1,6 +1,6 @@
 [package]
 name = "pdflinux"
-version = "0.1.12"
+version = "0.1.13"
 description = "PDFLinux - Privacy-first PDF tools for Linux"
 authors = ["saaandbite"]
 license = "MIT"
