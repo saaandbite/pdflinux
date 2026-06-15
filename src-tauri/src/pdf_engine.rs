@@ -117,11 +117,7 @@ pub async fn compress_pdf(input_path: String, output_path: String, quality: Stri
                 "-dCompatibilityLevel=1.4",
                 &format!("-dPDFSETTINGS={}", pdf_setting),
                 "-dNOPAUSE", "-dQUIET", "-dBATCH",
-                "-dNumRenderingThreads=1",
-                "-dNOINTERPOLATE",
-                "-dMaxBitmap=50331648",
                 &format!("-sOutputFile={}", output_path),
-                "-c", "8388608 setvmthreshold",
                 &input_path,
             ])
             .output()
@@ -355,11 +351,7 @@ pub async fn watermark_pdf(input_path: String, output_path: String, text: String
             .args([
                 "-sDEVICE=pdfwrite",
                 "-dNOPAUSE", "-dQUIET", "-dBATCH",
-                "-dNumRenderingThreads=1",
-                "-dNOINTERPOLATE",
-                "-dMaxBitmap=50331648",
                 &format!("-sOutputFile={}", output_path),
-                "-c", "8388608 setvmthreshold",
                 &ps_path.to_string_lossy(),
                 &input_path,
             ])
@@ -394,12 +386,7 @@ pub async fn image_to_pdf(input_paths: Vec<String>, output_path: String) -> Resu
             "-dNOPAUSE".to_string(),
             "-dQUIET".to_string(),
             "-dBATCH".to_string(),
-            "-dNumRenderingThreads=1".to_string(),
-            "-dNOINTERPOLATE".to_string(),
-            "-dMaxBitmap=50331648".to_string(),
             format!("-sOutputFile={}", output_path),
-            "-c".to_string(), "8388608 setvmthreshold".to_string(),
-            "-f".to_string(),
         ];
         args.extend(input_paths);
 
@@ -558,11 +545,7 @@ pub async fn crop_pdf(
             .args([
                 "-sDEVICE=pdfwrite",
                 "-dNOPAUSE", "-dQUIET", "-dBATCH",
-                "-dNumRenderingThreads=1",
-                "-dNOINTERPOLATE",
-                "-dMaxBitmap=50331648",
                 &format!("-sOutputFile={}", output_path),
-                "-c", "8388608 setvmthreshold",
                 "-c", &gs_script,
                 "-f", &input_path,
             ])
@@ -807,11 +790,7 @@ pub async fn add_page_numbers(
             .args([
                 "-sDEVICE=pdfwrite",
                 "-dNOPAUSE", "-dQUIET", "-dBATCH",
-                "-dNumRenderingThreads=1",
-                "-dNOINTERPOLATE",
-                "-dMaxBitmap=50331648",
                 &format!("-sOutputFile={}", output_path),
-                "-c", "8388608 setvmthreshold",
                 &ps_path.to_string_lossy(),
                 &input_path,
             ])
@@ -882,11 +861,7 @@ pub async fn grayscale_pdf(input_path: String, output_path: String) -> Result<Gr
                 "-sColorConversionStrategy=Gray",
                 "-dProcessColorModel=/DeviceGray",
                 "-dNOPAUSE", "-dQUIET", "-dBATCH",
-                "-dNumRenderingThreads=1",
-                "-dNOINTERPOLATE",
-                "-dMaxBitmap=50331648",
                 &format!("-sOutputFile={}", output_path),
-                "-c", "8388608 setvmthreshold",
                 &input_path,
             ])
             .output()
