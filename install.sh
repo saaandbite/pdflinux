@@ -58,6 +58,40 @@ detect_pkg_manager() {
     esac
 }
 
+try_download_prebuilt() {
+    local pm="$1"
+    local type
+    case "$pm" in
+        apt)         type="deb" ;;
+        dnf|yum)     type="rpm" ;;
+        pacman|zypper|*) type="appimage" ;;
+    esac
+
+    local version
+    version=$(node -pe "require('./package.json').version" 2>/dev/null) || return 1
+    [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || return 1
+
+    local filename
+    case "$type" in
+        deb)      filename="pdflinux_${version}_amd64.deb" ;;
+        rpm)      filename="pdflinux_${version}_x86_64.rpm" ;;
+        appimage) filename="pdflinux_${version}_amd64.AppImage" ;;
+    esac
+
+    local url="https://github.com/saaandbite/pdflinux/releases/download/v${version}/${filename}"
+    local dest="/tmp/${filename}"
+
+    info "Checking for pre-built binary v${version}..."
+    if curl -fsSL --max-time 30 -o "$dest" "$url" 2>/dev/null; then
+        success "Downloaded pre-built binary: ${filename}"
+        echo "$dest:$type"
+        return 0
+    else
+        warn "No pre-built release found. Building from source instead..."
+        return 1
+    fi
+}
+
 install_system_deps() {
     local pm="$1"
     info "Installing PDF system dependencies (Ghostscript, Poppler, QPDF, Tesseract)..."
@@ -281,11 +315,57 @@ sudo -v
 SUDO_KEEPALIVE=$!
 trap "kill $SUDO_KEEPALIVE 2>/dev/null" EXIT
 
-install_system_deps "$PKG_MANAGER"
-install_rust
-install_node "$PKG_MANAGER"
-build_app "$PKG_MANAGER"
-install_package "$PKG_MANAGER"
+# Try downloading a pre-built binary first (fast path)
+prebuilt_result=""
+if prebuilt_result=$(try_download_prebuilt "$PKG_MANAGER"); then
+    prebuilt_path="${prebuilt_result%%:*}"
+    prebuilt_type="${prebuilt_result##*:}"
+
+    install_system_deps "$PKG_MANAGER"
+
+    info "Installing pre-built binary..."
+    case "$prebuilt_type" in
+        deb)
+            sudo dpkg -i "$prebuilt_path"
+            ;;
+        rpm)
+            if command -v dnf &>/dev/null; then
+                sudo dnf install -y "$prebuilt_path"
+            else
+                sudo yum install -y "$prebuilt_path"
+            fi
+            ;;
+        appimage)
+            sudo mkdir -p /opt/pdflinux
+            sudo cp "$prebuilt_path" /opt/pdflinux/pdflinux.AppImage
+            sudo chmod +x /opt/pdflinux/pdflinux.AppImage
+            sudo ln -sf /opt/pdflinux/pdflinux.AppImage /usr/local/bin/pdflinux
+            if [ -f "src-tauri/icons/128x128.png" ]; then
+                sudo mkdir -p /usr/share/icons/hicolor/128x128/apps
+                sudo cp src-tauri/icons/128x128.png /usr/share/icons/hicolor/128x128/apps/pdflinux.png
+            fi
+            sudo tee /usr/share/applications/pdflinux.desktop > /dev/null <<EOF
+[Desktop Entry]
+Type=Application
+Name=PDFLinux
+Comment=Privacy-first PDF tools for Linux — runs 100% offline
+Exec=/opt/pdflinux/pdflinux.AppImage
+Icon=pdflinux
+Categories=Office;Utility;
+Terminal=false
+StartupNotify=true
+EOF
+            sudo update-desktop-database /usr/share/applications/ 2>/dev/null || true
+            ;;
+    esac
+else
+    # Fall back to building from source
+    install_system_deps "$PKG_MANAGER"
+    install_rust
+    install_node "$PKG_MANAGER"
+    build_app "$PKG_MANAGER"
+    install_package "$PKG_MANAGER"
+fi
 
 echo ""
 echo -e "${GREEN}╔══════════════════════════════════════════════════════╗${NC}"

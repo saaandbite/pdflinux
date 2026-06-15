@@ -1,33 +1,211 @@
 #!/usr/bin/env node
-import { spawnSync } from 'node:child_process';
-import { resolve, dirname } from 'node:path';
-import { existsSync } from 'node:fs';
+import { execSync } from 'node:child_process';
+import { createWriteStream, readFileSync, existsSync } from 'node:fs';
+import { resolve, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { tmpdir } from 'node:os';
+import https from 'node:https';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
-
 const root = resolve(__dirname, '..');
-const installScript = resolve(root, 'install.sh');
-const uninstallScript = resolve(root, 'uninstall.sh');
 
-const args = process.argv.slice(2);
-const cmd = args[0];
+const VERSION = JSON.parse(readFileSync(resolve(root, 'package.json'), 'utf8')).version;
+const REPO = 'saaandbite/pdflinux';
 
-if (cmd === 'uninstall') {
-    if (!existsSync(uninstallScript)) {
-        console.error('uninstall.sh not found.');
-        process.exit(1);
-    }
-    const result = spawnSync('bash', [uninstallScript], { stdio: 'inherit' });
-    process.exit(result.status ?? 0);
-}
-
-// Default: install
-if (!existsSync(installScript)) {
-    console.error('install.sh not found.');
+const arg = process.argv[2];
+if (arg === 'uninstall') {
+  runUninstall();
+} else {
+  runInstall().catch(err => {
+    console.error(`\nError: ${err.message}`);
     process.exit(1);
+  });
 }
 
-const result = spawnSync('bash', [installScript], { stdio: 'inherit', cwd: root });
-process.exit(result.status ?? 0);
+// ── Distro detection ──────────────────────────────────────────────────────────
+
+function detectDistro() {
+  try {
+    const text = readFileSync('/etc/os-release', 'utf8');
+    const get = key => {
+      const m = text.match(new RegExp(`^${key}="?([^"\\n]+)"?`, 'm'));
+      return m ? m[1].toLowerCase().trim() : '';
+    };
+    return { id: get('ID'), idLike: get('ID_LIKE') };
+  } catch {
+    return { id: '', idLike: '' };
+  }
+}
+
+function getPackageType(id, idLike) {
+  const all = [id, ...idLike.split(/\s+/)].filter(Boolean);
+  const is = (...names) => all.some(d => names.some(n => d.includes(n)));
+  if (is('debian', 'ubuntu', 'linuxmint', 'pop', 'elementary', 'zorin', 'kali', 'raspbian', 'neon', 'deepin', 'mx')) return 'deb';
+  if (is('fedora', 'rhel', 'centos', 'rocky', 'almalinux', 'ol', 'amzn', 'opensuse', 'sles', 'suse')) return 'rpm';
+  return 'appimage';
+}
+
+// ── Download with redirect following ─────────────────────────────────────────
+
+function download(url, dest) {
+  return new Promise((resolve, reject) => {
+    const follow = url => {
+      https.get(url, { headers: { 'User-Agent': 'pdflinux-installer' } }, res => {
+        if ([301, 302, 307, 308].includes(res.statusCode)) {
+          return follow(res.headers.location);
+        }
+        if (res.statusCode !== 200) {
+          return reject(new Error(
+            `Download failed (HTTP ${res.statusCode}).\n` +
+            `Make sure the GitHub Release for v${VERSION} exists:\n` +
+            `https://github.com/${REPO}/releases`
+          ));
+        }
+        const total = parseInt(res.headers['content-length'] || '0', 10);
+        let received = 0;
+        const file = createWriteStream(dest);
+        res.on('data', chunk => {
+          received += chunk.length;
+          if (total) {
+            const pct = Math.floor(received / total * 100);
+            process.stdout.write(`\r  ${pct}%  (${(received / 1048576).toFixed(1)} / ${(total / 1048576).toFixed(1)} MB)`);
+          }
+        });
+        res.pipe(file);
+        file.on('finish', () => { file.close(); process.stdout.write('\n'); resolve(); });
+        file.on('error', reject);
+      }).on('error', reject);
+    };
+    follow(url);
+  });
+}
+
+// ── Install ───────────────────────────────────────────────────────────────────
+
+async function runInstall() {
+  const { id, idLike } = detectDistro();
+  const type = getPackageType(id, idLike);
+
+  const filename = {
+    deb:      `pdflinux_${VERSION}_amd64.deb`,
+    rpm:      `pdflinux_${VERSION}_x86_64.rpm`,
+    appimage: `pdflinux_${VERSION}_amd64.AppImage`,
+  }[type];
+
+  const url = `https://github.com/${REPO}/releases/download/v${VERSION}/${filename}`;
+  const tmp = join(tmpdir(), filename);
+
+  console.log(`\nPDFLinux v${VERSION} Installer`);
+  console.log(`Distro  : ${id || 'unknown'}${idLike ? ` (like ${idLike})` : ''}`);
+  console.log(`Package : ${type.toUpperCase()}`);
+  console.log(`\nDownloading ${filename}...`);
+
+  await download(url, tmp);
+
+  console.log('Installing PDF tools (Ghostscript, Poppler, QPDF, Tesseract)...');
+  installSystemDeps(type);
+
+  console.log('Installing pdflinux...');
+  if (type === 'deb') {
+    execSync(`sudo apt-get install -y "${tmp}"`, { stdio: 'inherit' });
+  } else if (type === 'rpm') {
+    try {
+      execSync(`sudo dnf install -y "${tmp}"`, { stdio: 'inherit' });
+    } catch {
+      execSync(`sudo yum install -y "${tmp}"`, { stdio: 'inherit' });
+    }
+  } else {
+    installAppImage(tmp);
+  }
+
+  console.log(`\n✓ PDFLinux installed successfully!`);
+  console.log(`  Run from terminal : pdflinux`);
+  console.log(`  Or find it in your application menu.\n`);
+}
+
+function installSystemDeps(type) {
+  try {
+    if (type === 'deb') {
+      execSync('sudo apt-get install -y ghostscript poppler-utils qpdf tesseract-ocr', { stdio: 'inherit' });
+    } else if (type === 'rpm') {
+      try {
+        execSync('sudo dnf install -y ghostscript poppler-utils qpdf tesseract', { stdio: 'inherit' });
+      } catch {
+        execSync('sudo yum install -y ghostscript poppler-utils qpdf tesseract', { stdio: 'inherit' });
+      }
+    } else if (existsSync('/usr/bin/pacman')) {
+      execSync('sudo pacman -Sy --noconfirm ghostscript poppler qpdf tesseract', { stdio: 'inherit' });
+    } else if (existsSync('/usr/bin/zypper')) {
+      execSync('sudo zypper install -y ghostscript poppler-tools qpdf tesseract-ocr', { stdio: 'inherit' });
+    }
+  } catch (e) {
+    console.warn(`  Warning: could not auto-install system deps: ${e.message}`);
+    console.warn('  Please install manually: ghostscript poppler-utils qpdf tesseract-ocr');
+  }
+}
+
+function installAppImage(src) {
+  const appImageDest = '/opt/pdflinux/pdflinux.AppImage';
+  const iconSrc = resolve(root, 'src-tauri/icons/128x128.png');
+
+  execSync('sudo mkdir -p /opt/pdflinux', { stdio: 'inherit' });
+  execSync(`sudo cp "${src}" "${appImageDest}"`, { stdio: 'inherit' });
+  execSync(`sudo chmod +x "${appImageDest}"`, { stdio: 'inherit' });
+  execSync(`sudo ln -sf "${appImageDest}" /usr/local/bin/pdflinux`, { stdio: 'inherit' });
+
+  if (existsSync(iconSrc)) {
+    execSync('sudo mkdir -p /usr/share/icons/hicolor/128x128/apps', { stdio: 'inherit' });
+    execSync(`sudo cp "${iconSrc}" /usr/share/icons/hicolor/128x128/apps/pdflinux.png`, { stdio: 'inherit' });
+  }
+
+  const desktop = [
+    '[Desktop Entry]',
+    'Type=Application',
+    'Name=PDFLinux',
+    'Comment=Privacy-first PDF tools for Linux — runs 100% offline',
+    `Exec=${appImageDest}`,
+    'Icon=pdflinux',
+    'Categories=Office;Utility;',
+    'Terminal=false',
+    'StartupNotify=true',
+  ].join('\n') + '\n';
+
+  execSync('sudo tee /usr/share/applications/pdflinux.desktop > /dev/null', {
+    input: desktop,
+    stdio: ['pipe', 'inherit', 'inherit'],
+  });
+  execSync('sudo update-desktop-database /usr/share/applications/ 2>/dev/null || true', { stdio: 'inherit' });
+}
+
+// ── Uninstall ─────────────────────────────────────────────────────────────────
+
+function runUninstall() {
+  const { id, idLike } = detectDistro();
+  const type = getPackageType(id, idLike);
+
+  console.log('Uninstalling pdflinux...');
+  try {
+    if (type === 'deb') {
+      execSync('sudo apt-get remove -y pdflinux', { stdio: 'inherit' });
+    } else if (type === 'rpm') {
+      try {
+        execSync('sudo dnf remove -y pdflinux', { stdio: 'inherit' });
+      } catch {
+        execSync('sudo yum remove -y pdflinux', { stdio: 'inherit' });
+      }
+    } else {
+      execSync(
+        'sudo rm -rf /opt/pdflinux /usr/local/bin/pdflinux ' +
+        '/usr/share/applications/pdflinux.desktop ' +
+        '/usr/share/icons/hicolor/128x128/apps/pdflinux.png',
+        { stdio: 'inherit' }
+      );
+      execSync('sudo update-desktop-database /usr/share/applications/ 2>/dev/null || true', { stdio: 'inherit' });
+    }
+    console.log('pdflinux has been uninstalled.');
+  } catch (e) {
+    console.error(`Uninstall failed: ${e.message}`);
+    process.exit(1);
+  }
+}
