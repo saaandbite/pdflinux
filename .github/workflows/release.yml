@@ -9,9 +9,9 @@ permissions:
   contents: write
 
 jobs:
-  release:
+  # ── Linux build ─────────────────────────────────────────────────────────────
+  release-linux:
     runs-on: ubuntu-22.04
-
     steps:
       - uses: actions/checkout@v4
 
@@ -45,14 +45,14 @@ jobs:
       - name: Install npm dependencies
         run: npm install
 
-      - name: Build app
-        run: npx tauri build
+      - name: Build app (Linux)
+        run: npx tauri build --bundles deb,rpm,appimage
 
       - name: Get version from tag
         id: version
         run: echo "version=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
 
-      - name: Stage artifacts
+      - name: Stage Linux artifacts
         run: |
           mkdir -p artifacts
           V=${{ steps.version.outputs.version }}
@@ -61,17 +61,135 @@ jobs:
           rpm=$(find src-tauri/target/release/bundle/rpm -name "*.rpm" 2>/dev/null | head -1)
           ai=$(find src-tauri/target/release/bundle/appimage -name "*.AppImage" 2>/dev/null | head -1)
 
-          [ -n "$deb" ] && cp "$deb" "artifacts/pdflinux_${V}_amd64.deb" && echo "deb: $deb"
-          [ -n "$rpm" ] && cp "$rpm" "artifacts/pdflinux_${V}_x86_64.rpm" && echo "rpm: $rpm"
-          [ -n "$ai"  ] && cp "$ai"  "artifacts/pdflinux_${V}_amd64.AppImage" && echo "AppImage: $ai"
+          [ -n "$deb" ] && cp "$deb" "artifacts/pdf-chips_${V}_amd64.deb"   && echo "deb: $deb"
+          [ -n "$rpm" ] && cp "$rpm" "artifacts/pdf-chips_${V}_x86_64.rpm"  && echo "rpm: $rpm"
+          [ -n "$ai"  ] && cp "$ai"  "artifacts/pdf-chips_${V}_amd64.AppImage" && echo "AppImage: $ai"
 
           ls -lh artifacts/
+
+      - name: Upload Linux artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-artifacts
+          path: artifacts/*
+
+  # ── Windows build ────────────────────────────────────────────────────────────
+  release-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - name: Install npm dependencies
+        run: npm install
+
+      - name: Build app (Windows NSIS)
+        run: npx tauri build --bundles nsis
+
+      - name: Get version from tag
+        id: version
+        shell: bash
+        run: echo "version=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
+
+      - name: Stage Windows artifacts
+        shell: bash
+        run: |
+          mkdir -p artifacts
+          V=${{ steps.version.outputs.version }}
+
+          exe=$(find src-tauri/target/release/bundle/nsis -name "*.exe" 2>/dev/null | head -1)
+          [ -n "$exe" ] && cp "$exe" "artifacts/PDF.and.Chips_${V}_x64-setup.exe" && echo "exe: $exe"
+
+          ls -lh artifacts/
+
+      - name: Upload Windows artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-artifacts
+          path: artifacts/*
+
+  # ── macOS build ───────────────────────────────────────────────────────────────
+  release-macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin,x86_64-apple-darwin
+
+      - name: Cache Rust
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - name: Install npm dependencies
+        run: npm install
+
+      - name: Build app (macOS dmg — universal)
+        run: npx tauri build --bundles dmg --target universal-apple-darwin
+
+      - name: Get version from tag
+        id: version
+        run: echo "version=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
+
+      - name: Stage macOS artifacts
+        run: |
+          mkdir -p artifacts
+          V=${{ steps.version.outputs.version }}
+
+          dmg=$(find src-tauri/target/universal-apple-darwin/release/bundle/dmg -name "*.dmg" 2>/dev/null | head -1)
+          [ -n "$dmg" ] && cp "$dmg" "artifacts/PDF.and.Chips_${V}_universal.dmg" && echo "dmg: $dmg"
+
+          ls -lh artifacts/
+
+      - name: Upload macOS artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-artifacts
+          path: artifacts/*
+
+  # ── Create GitHub Release (after all platforms build) ────────────────────────
+  create-release:
+    needs: [release-linux, release-windows, release-macos]
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Get version from tag
+        id: version
+        run: echo "version=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: all-artifacts
+          merge-multiple: true
+
+      - name: List artifacts
+        run: ls -lh all-artifacts/
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          name: PDFLinux v${{ steps.version.outputs.version }}
-          files: artifacts/*
+          name: PDF & Chips v${{ steps.version.outputs.version }}
+          files: all-artifacts/*
           generate_release_notes: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

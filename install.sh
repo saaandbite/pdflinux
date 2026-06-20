@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 set -uo pipefail
 
-APP_NAME="pdflinux"
-DISPLAY_NAME="PDFLinux"
-REPO_URL="https://github.com/saaandbite/pdflinux"
+APP_NAME="pdf-chips"
+DISPLAY_NAME="PDF & Chips"
+REPO_URL="https://github.com/saaandbite/pdfchips"
 
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -113,12 +113,12 @@ try_download_prebuilt() {
 
     local filename
     case "$type" in
-        deb)      filename="pdflinux_${version}_amd64.deb" ;;
-        rpm)      filename="pdflinux_${version}_x86_64.rpm" ;;
-        appimage) filename="pdflinux_${version}_amd64.AppImage" ;;
+        deb)      filename="pdf-chips_${version}_amd64.deb" ;;
+        rpm)      filename="pdf-chips_${version}_x86_64.rpm" ;;
+        appimage) filename="pdf-chips_${version}_amd64.AppImage" ;;
     esac
 
-    local url="https://github.com/saaandbite/pdflinux/releases/download/v${version}/${filename}"
+    local url="https://github.com/saaandbite/pdfchips/releases/download/v${version}/${filename}"
     local dest="/tmp/${filename}"
 
     info "Checking for pre-built binary v${version}..."
@@ -246,7 +246,7 @@ build_app() {
 
 install_prebuilt_deb() {
     local path="$1"
-    info "Installing pdflinux from .deb package..."
+    info "Installing pdf-chips from .deb package..."
 
     # Try dpkg with privilege first
     if priv_run dpkg -i "$path" 2>/dev/null; then
@@ -262,13 +262,13 @@ install_prebuilt_deb() {
 
     if command -v dpkg-deb &>/dev/null; then
         dpkg-deb -x "$path" "$tmp_extract"
-        if [ -f "$tmp_extract/usr/bin/pdflinux" ]; then
-            cp "$tmp_extract/usr/bin/pdflinux" "$install_dir/pdflinux"
-            chmod +x "$install_dir/pdflinux"
+        if [ -f "$tmp_extract/usr/bin/pdf-chips" ]; then
+            cp "$tmp_extract/usr/bin/pdf-chips" "$install_dir/pdf-chips"
+            chmod +x "$install_dir/pdf-chips"
             rm -rf "$tmp_extract"
             # Ensure ~/.local/bin is on PATH
             _ensure_path_in_shell "$install_dir"
-            success "$DISPLAY_NAME installed to $install_dir/pdflinux (no-sudo fallback)"
+            success "$DISPLAY_NAME installed to $install_dir/pdf-chips (no-sudo fallback)"
             return 0
         fi
         rm -rf "$tmp_extract"
@@ -282,7 +282,7 @@ install_prebuilt_deb() {
 
 install_prebuilt_rpm() {
     local path="$1"
-    info "Installing pdflinux from .rpm package..."
+    info "Installing pdf-chips from .rpm package..."
     if command -v dnf &>/dev/null; then
         priv_run dnf install -y "$path" || {
             warn "Please ask admin to run: sudo dnf install -y $path"
@@ -371,8 +371,8 @@ install_desktop_file() {
     cat > "$desktop_dir/$APP_NAME.desktop" <<EOF
 [Desktop Entry]
 Type=Application
-Name=PDFLinux
-Comment=Privacy-first PDF tools for Linux — runs 100% offline
+Name=PDF & Chips
+Comment=Privacy-first PDF tools — runs 100% offline
 Exec=$exec_path
 Icon=$APP_NAME
 Categories=Office;Utility;
@@ -393,7 +393,7 @@ EOF
 
 echo ""
 echo -e "${BLUE}╔══════════════════════════════════╗${NC}"
-echo -e "${BLUE}║   PDFLinux — Installer           ║${NC}"
+echo -e "${BLUE}║   PDF & Chips — Installer        ║${NC}"
 echo -e "${BLUE}╚══════════════════════════════════╝${NC}"
 echo ""
 
@@ -450,9 +450,9 @@ fi
 
 echo ""
 echo -e "${GREEN}╔══════════════════════════════════════════════════════╗${NC}"
-echo -e "${GREEN}║   ✓ PDFLinux installed successfully!                 ║${NC}"
+echo -e "${GREEN}║   ✓ PDF & Chips installed successfully!              ║${NC}"
 echo -e "${GREEN}║                                                      ║${NC}"
-echo -e "${GREEN}║   • Launch from app menu: search for \"PDFLinux\"      ║${NC}"
-echo -e "${GREEN}║   • Or run from terminal: pdflinux                   ║${NC}"
+echo -e "${GREEN}║   • Launch from app menu: search for \"PDF & Chips\"   ║${NC}"
+echo -e "${GREEN}║   • Or run from terminal: pdf-chips                  ║${NC}"
 echo -e "${GREEN}╚══════════════════════════════════════════════════════╝${NC}"
 echo ""

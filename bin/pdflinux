@@ -11,7 +11,7 @@ const __dirname = dirname(__filename);
 const root = resolve(__dirname, '..');
 
 const VERSION = JSON.parse(readFileSync(resolve(root, 'package.json'), 'utf8')).version;
-const REPO = 'saaandbite/pdflinux';
+const REPO = 'saaandbite/pdfchips';
 
 const arg = process.argv[2];
 if (arg === 'uninstall') {
@@ -76,6 +76,8 @@ function detectDistro() {
 }
 
 function getPackageType(id, idLike) {
+  // Windows
+  if (process.platform === 'win32') return 'nsis';
   const all = [id, ...idLike.split(/\s+/)].filter(Boolean);
   const is = (...names) => all.some(d => names.some(n => d.includes(n)));
   if (is('debian', 'ubuntu', 'linuxmint', 'pop', 'elementary', 'zorin', 'kali', 'raspbian', 'neon', 'deepin', 'mx')) return 'deb';
@@ -121,6 +123,16 @@ function download(url, dest) {
 // ── System deps ───────────────────────────────────────────────────────────────
 
 function installSystemDeps(type) {
+  if (type === 'nsis') {
+    console.log('\n  ℹ  Windows detected. Dependency tools (Ghostscript, Poppler, QPDF, Tesseract)');
+    console.log('     must be installed via winget or Chocolatey if not present:');
+    console.log('     winget install ArtifexSoftware.GhostScript');
+    console.log('     winget install inkscape.inkscape  (or poppler via choco)');
+    console.log('     winget install qpdf.qpdf');
+    console.log('     winget install UB-Mannheim.TesseractOCR');
+    console.log('     The installer will try to proceed without them for now.\n');
+    return;
+  }
   console.log('Installing PDF tools (Ghostscript, Poppler, QPDF, Tesseract)...');
   let ok = false;
   try {
@@ -189,12 +201,27 @@ function installRpm(tmp) {
   }
 }
 
+// ── Install .exe (NSIS / Windows) ────────────────────────────────────────────
+
+function installNsis(tmp) {
+  console.log(`  Launching Windows installer: ${tmp}`);
+  console.log('  Follow the on-screen wizard to complete installation.');
+  try {
+    // Run the NSIS installer — it opens a GUI wizard
+    execSync(`"${tmp}"`, { stdio: 'inherit' });
+    console.log('  ✓ Installation wizard completed.');
+  } catch (e) {
+    console.warn(`  ⚠  Installer exited with non-zero status: ${e.message}`);
+    console.warn('     If the app was installed, you can ignore this warning.');
+  }
+}
+
 // ── Install AppImage (always user-level, no sudo) ─────────────────────────────
 
 function installAppImage(src) {
   const localBin = join(homedir(), '.local', 'bin');
   mkdirSync(localBin, { recursive: true });
-  const dest = join(localBin, 'pdflinux');
+  const dest = join(localBin, 'pdf-chips');
   copyFileSync(src, dest);
   chmodSync(dest, 0o755);
   ensureLocalBinInPath(localBin);
@@ -212,20 +239,20 @@ function installDesktopFile(execPath) {
     const iconDir = join(homedir(), '.local', 'share', 'icons', 'hicolor', '128x128', 'apps');
     mkdirSync(iconDir, { recursive: true });
     if (existsSync(iconSrc)) {
-      copyFileSync(iconSrc, join(iconDir, 'pdflinux.png'));
+      copyFileSync(iconSrc, join(iconDir, 'pdf-chips.png'));
     }
     const desktop = [
       '[Desktop Entry]',
       'Type=Application',
-      'Name=PDFLinux',
-      'Comment=Privacy-first PDF tools for Linux — runs 100% offline',
+      'Name=PDF & Chips',
+      'Comment=Privacy-first PDF tools — runs 100% offline',
       `Exec=${execPath}`,
-      'Icon=pdflinux',
+      'Icon=pdf-chips',
       'Categories=Office;Utility;',
       'Terminal=false',
       'StartupNotify=true',
     ].join('\n') + '\n';
-    const desktopPath = join(desktopDir, 'pdflinux.desktop');
+    const desktopPath = join(desktopDir, 'pdf-chips.desktop');
     writeFileSync(desktopPath, desktop);
     try { execSync(`update-desktop-database "${desktopDir}" 2>/dev/null`, { stdio: 'ignore' }); } catch {}
     console.log('  ✓ Application menu shortcut added.');
@@ -256,19 +283,25 @@ async function runInstall() {
   const type = getPackageType(id, idLike);
 
   const filename = {
-    deb:      `pdflinux_${VERSION}_amd64.deb`,
-    rpm:      `pdflinux_${VERSION}_x86_64.rpm`,
-    appimage: `pdflinux_${VERSION}_amd64.AppImage`,
+    deb:      `pdf-chips_${VERSION}_amd64.deb`,
+    rpm:      `pdf-chips_${VERSION}_x86_64.rpm`,
+    appimage: `pdf-chips_${VERSION}_amd64.AppImage`,
+    nsis:     `PDF.and.Chips_${VERSION}_x64-setup.exe`,
   }[type];
 
   const url = `https://github.com/${REPO}/releases/download/v${VERSION}/${filename}`;
   const tmp = join(tmpdir(), filename);
 
-  console.log(`\nPDFLinux v${VERSION} Installer`);
-  console.log(`Distro  : ${id || 'unknown'}${idLike ? ` (like ${idLike})` : ''}`);
-  console.log(`Package : ${type.toUpperCase()}`);
+  console.log(`\nPDF & Chips v${VERSION} Installer`);
+  if (type === 'nsis') {
+    console.log(`Platform: Windows`);
+    console.log(`Package : NSIS installer (.exe)`);
+  } else {
+    console.log(`Distro  : ${id || 'unknown'}${idLike ? ` (like ${idLike})` : ''}`);
+    console.log(`Package : ${type.toUpperCase()}`);
+  }
 
-  if (!hasSudo() && !isRoot()) {
+  if (!hasSudo() && !isRoot() && type !== 'nsis') {
     console.warn(`\n  ⚠  No sudo access detected.`);
     console.warn(`     System-level installation may not be possible.`);
     if (type !== 'appimage') {
@@ -282,8 +315,10 @@ async function runInstall() {
 
   installSystemDeps(type);
 
-  console.log(`\nInstalling pdflinux...`);
-  if (type === 'deb') {
+  console.log(`\nInstalling pdf-chips...`);
+  if (type === 'nsis') {
+    installNsis(tmp);
+  } else if (type === 'deb') {
     installDeb(tmp);
   } else if (type === 'rpm') {
     installRpm(tmp);
@@ -291,9 +326,13 @@ async function runInstall() {
     installAppImage(tmp);
   }
 
-  console.log(`\n✓ PDFLinux installed successfully!`);
-  console.log(`  Run from terminal : pdflinux`);
-  console.log(`  Or find it in your application menu.\n`);
+  console.log(`\n✓ PDF & Chips installed successfully!`);
+  if (type === 'nsis') {
+    console.log(`  Find it in your Start Menu or Desktop.\n`);
+  } else {
+    console.log(`  Run from terminal : pdf-chips`);
+    console.log(`  Or find it in your application menu.\n`);
+  }
 }
 
 // ── Uninstall ─────────────────────────────────────────────────────────────────
@@ -301,9 +340,9 @@ async function runInstall() {
 function runUninstall() {
   const { id, idLike } = detectDistro();
   const type = getPackageType(id, idLike);
-  const localBin = join(homedir(), '.local', 'bin', 'pdflinux');
+  const localBin = join(homedir(), '.local', 'bin', 'pdf-chips');
 
-  console.log('Uninstalling pdflinux...');
+  console.log('Uninstalling pdf-chips...');
 
   // Remove user-level install first (no sudo needed)
   if (existsSync(localBin)) {
@@ -316,7 +355,7 @@ function runUninstall() {
   }
 
   // Remove desktop file
-  const desktopFile = join(homedir(), '.local', 'share', 'applications', 'pdflinux.desktop');
+  const desktopFile = join(homedir(), '.local', 'share', 'applications', 'pdf-chips.desktop');
   if (existsSync(desktopFile)) {
     try { rmSync(desktopFile); } catch {}
   }
@@ -324,15 +363,15 @@ function runUninstall() {
   // Remove system-level install (if sudo available)
   try {
     if (type === 'deb') {
-      privRun(['apt-get', 'remove', '-y', 'pdflinux']);
+      privRun(['apt-get', 'remove', '-y', 'pdf-chips']);
     } else if (type === 'rpm') {
-      privRun(['dnf', 'remove', '-y', 'pdflinux']) || privRun(['yum', 'remove', '-y', 'pdflinux']);
+      privRun(['dnf', 'remove', '-y', 'pdf-chips']) || privRun(['yum', 'remove', '-y', 'pdf-chips']);
     } else {
-      privRun(['rm', '-rf', '/opt/pdflinux', '/usr/local/bin/pdflinux',
-        '/usr/share/applications/pdflinux.desktop',
-        '/usr/share/icons/hicolor/128x128/apps/pdflinux.png']);
+      privRun(['rm', '-rf', '/opt/pdf-chips', '/usr/local/bin/pdf-chips',
+        '/usr/share/applications/pdf-chips.desktop',
+        '/usr/share/icons/hicolor/128x128/apps/pdf-chips.png']);
     }
   } catch { /* ignore */ }
 
-  console.log('pdflinux has been uninstalled.');
+  console.log('pdf-chips has been uninstalled.');
 }

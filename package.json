@@ -1,18 +1,18 @@
 {
-  "name": "pdflinux",
-  "version": "0.1.13",
-  "description": "Privacy-first PDF tools for Linux — runs 100% offline",
-  "keywords": ["pdf", "linux", "tools", "privacy", "tauri", "desktop"],
+  "name": "pdf-chips",
+  "version": "0.1.14",
+  "description": "Privacy-first PDF tools for Linux, Windows & macOS — runs 100% offline",
+  "keywords": ["pdf", "linux", "windows", "tools", "privacy", "tauri", "desktop"],
   "author": "saaandbite",
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/saaandbite/pdflinux"
+    "url": "https://github.com/saaandbite/pdfchips"
   },
-  "homepage": "https://github.com/saaandbite/pdflinux#readme",
+  "homepage": "https://github.com/saaandbite/pdfchips#readme",
   "type": "module",
   "bin": {
-    "pdflinux": "./bin/pdflinux"
+    "pdf-chips": "./bin/pdflinux"
   },
   "scripts": {
     "dev": "vite",
@@ -24,6 +24,7 @@
   "files": [
     "bin/",
     "install.sh",
+    "install.ps1",
     "uninstall.sh",
     "src/",
     "src-tauri/",

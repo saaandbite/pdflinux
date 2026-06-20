@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-APP_NAME="pdflinux"
-DISPLAY_NAME="PDFLinux"
+APP_NAME="pdf-chips"
+DISPLAY_NAME="PDF & Chips"
 
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -55,22 +55,22 @@ PM=$(detect_pkg_manager "$(detect_distro)")
 
 echo ""
 echo -e "${RED}╔══════════════════════════════════╗${NC}"
-echo -e "${RED}║   PDFLinux — Uninstall           ║${NC}"
+echo -e "${RED}║   PDF & Chips — Uninstall       ║${NC}"
 echo -e "${RED}╚══════════════════════════════════╝${NC}"
 echo ""
 
 # Remove package installed via package manager
 case "$PM" in
     apt)
-        if dpkg -l "pdflinux" &>/dev/null 2>&1; then
+        if dpkg -l "pdf-chips" &>/dev/null 2>&1; then
             info "Removing .deb package..."
-            sudo apt-get remove -y pdflinux || true
+            sudo apt-get remove -y pdf-chips || true
         fi
         ;;
     dnf|yum)
-        if rpm -q "pdflinux" &>/dev/null 2>&1; then
+        if rpm -q "pdf-chips" &>/dev/null 2>&1; then
             info "Removing .rpm package..."
-            sudo "$PM" remove -y pdflinux || true
+            sudo "$PM" remove -y pdf-chips || true
         fi
         ;;
 esac

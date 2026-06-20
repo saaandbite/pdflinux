@@ -60,8 +60,8 @@ export default function Sidebar({ theme, onToggleTheme }: SidebarProps) {
   return (
     <aside className="sidebar">
       <div className="sidebar-logo">
-        <div className="logo-icon">P</div>
-        <h1>PDF Tools</h1>
+        <img src="/Logo.svg" alt="PDF & Chips logo" className="logo-img" />
+        <h1>PDF &amp; Chips</h1>
       </div>
       <nav className="sidebar-nav">
         {groups.map((group) => (

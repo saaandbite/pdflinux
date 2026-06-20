@@ -1192,10 +1192,27 @@ pub async fn cleanup_temp() -> Result<String, String> {
 
 #[tauri::command]
 pub async fn open_folder(path: String) -> Result<(), String> {
-    Command::new("xdg-open")
-        .arg(&path)
-        .spawn()
-        .map_err(|e| format!("Gagal membuka folder: {}", e))?;
+    #[cfg(target_os = "windows")]
+    {
+        Command::new("explorer")
+            .arg(&path)
+            .spawn()
+            .map_err(|e| format!("Gagal membuka folder: {}", e))?;
+    }
+    #[cfg(target_os = "macos")]
+    {
+        Command::new("open")
+            .arg(&path)
+            .spawn()
+            .map_err(|e| format!("Gagal membuka folder: {}", e))?;
+    }
+    #[cfg(target_os = "linux")]
+    {
+        Command::new("xdg-open")
+            .arg(&path)
+            .spawn()
+            .map_err(|e| format!("Gagal membuka folder: {}", e))?;
+    }
     Ok(())
 }
 

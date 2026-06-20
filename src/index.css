@@ -126,16 +126,12 @@ a { text-decoration: none; color: inherit; }
   margin-bottom: 12px;
 }
 
-.sidebar-logo .logo-icon {
+.sidebar-logo .logo-img {
   width: 36px;
   height: 36px;
-  background: var(--accent);
+  object-fit: contain;
   border-radius: var(--radius-sm);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 17px;
-  color: var(--accent-text);
+  flex-shrink: 0;
 }
 
 .sidebar-logo h1 {

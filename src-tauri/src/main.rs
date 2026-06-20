@@ -6,20 +6,20 @@ fn main() {
   if args.len() > 1 {
     match args[1].as_str() {
       "--version" | "-v" => {
-        println!("pdflinux {}", env!("CARGO_PKG_VERSION"));
+        println!("pdf-chips {}", env!("CARGO_PKG_VERSION"));
         return;
       }
       "--help" | "-h" => {
-        println!("pdflinux {} — Privacy-first PDF tools for Linux", env!("CARGO_PKG_VERSION"));
+        println!("PDF & Chips {} — Privacy-first PDF tools", env!("CARGO_PKG_VERSION"));
         println!();
         println!("Usage:");
-        println!("  pdflinux           Launch the application");
-        println!("  pdflinux --version Print version");
-        println!("  pdflinux --help    Show this help");
+        println!("  pdf-chips           Launch the application");
+        println!("  pdf-chips --version Print version");
+        println!("  pdf-chips --help    Show this help");
         return;
       }
       _ => {}
     }
   }
-  pdflinux_lib::run();
+  pdf_chips_lib::run();
 }
