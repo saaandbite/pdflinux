@@ -1,5 +1,5 @@
 {
-  "name": "pdf-chips",
+  "name": "pdflinux",
   "version": "0.1.14",
   "description": "Privacy-first PDF tools for Linux, Windows & macOS — runs 100% offline",
   "keywords": ["pdf", "linux", "windows", "tools", "privacy", "tauri", "desktop"],
@@ -12,7 +12,8 @@
   "homepage": "https://github.com/saaandbite/pdfchips#readme",
   "type": "module",
   "bin": {
-    "pdf-chips": "./bin/pdflinux"
+    "pdf-chips": "./bin/pdflinux",
+    "pdflinux": "./bin/pdflinux"
   },
   "scripts": {
     "dev": "vite",
