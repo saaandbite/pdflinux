@@ -235,6 +235,22 @@ function installDesktopFile(execPath) {
   try {
     const desktopDir = join(homedir(), '.local', 'share', 'applications');
     mkdirSync(desktopDir, { recursive: true });
+
+    // ── Cleanup old pdflinux entries (prevent duplicate app icons) ──
+    const oldDesktop = join(desktopDir, 'pdflinux.desktop');
+    if (existsSync(oldDesktop)) {
+      try { rmSync(oldDesktop); console.log('  ✓ Removed old pdflinux.desktop'); } catch {}
+    }
+    const oldBin = join(homedir(), '.local', 'bin', 'pdflinux');
+    if (existsSync(oldBin)) {
+      try { rmSync(oldBin); console.log('  ✓ Removed old pdflinux binary'); } catch {}
+    }
+    const oldIcon = join(homedir(), '.local', 'share', 'icons', 'hicolor', '128x128', 'apps', 'pdflinux.png');
+    if (existsSync(oldIcon)) {
+      try { rmSync(oldIcon); } catch {}
+    }
+    // ────────────────────────────────────────────────────────────────
+
     const iconSrc = resolve(root, 'src-tauri/icons/128x128.png');
     const iconDir = join(homedir(), '.local', 'share', 'icons', 'hicolor', '128x128', 'apps');
     mkdirSync(iconDir, { recursive: true });

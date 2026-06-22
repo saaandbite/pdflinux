@@ -1,6 +1,6 @@
 [package]
 name = "pdf-chips"
-version = "0.1.15"
+version = "0.1.16"
 description = "PDF & Chips - Privacy-first PDF tools for Linux, Windows & macOS"
 authors = ["saaandbite"]
 license = "MIT"

@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <!-- Dark background rounded square -->
+  <rect width="512" height="512" rx="80" fill="#1a1a2e"/>
+  <!-- Logo centered, scaled to fit -->
+  <image href="/Logo.svg" x="32" y="128" width="448" height="256" preserveAspectRatio="xMidYMid meet"/>
+</svg>
